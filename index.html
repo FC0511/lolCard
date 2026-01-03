@@ -120,6 +120,8 @@
     </style>
 </head>
 <body>
+    <!-- 引入 GSAP 动画库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <div class="container">
         <div class="spiral-container" id="spiral">
             <!-- 卡牌将通过 JS 动态生成 -->
@@ -157,30 +159,43 @@
         }
 
         const cards = document.querySelectorAll('.card');
-        let rotation = 0;
+        
+        // ==================== GSAP 动画状态对象 ====================
+        // 使用对象存储动画状态，方便 GSAP 进行动画控制
+        const animState = {
+            rotation: 0,       // 当前旋转角度
+            offsetY: 0         // 当前垂直偏移
+        };
+        
+        // 目标值（用户输入的目标位置）
         let targetRotation = 0;
-        let offsetY = 0; // 整体垂直偏移量
-        let targetOffsetY = 0; // 目标垂直偏移量
-        const cardSpacing = 80; // 卡片之间的固定间距
-        const spiralRadius = 250; // 螺旋半径（放大）
-        const rotationsPerCard = 0.6; // 每张卡片旋转的弧度，控制螺旋的紧密度
+        let targetOffsetY = 0;
+        
+        // 螺旋参数
+        const cardSpacing = 80;        // 卡片之间的固定间距
+        const spiralRadius = 250;      // 螺旋半径
+        const rotationsPerCard = 0.6;  // 每张卡片旋转的弧度，控制螺旋紧密度
+        
+        // 边界限制
+        const minOffsetY = -(cardCount - 1) * cardSpacing - 200; // 最小偏移（向上滚动的极限）
+        const maxOffsetY = 200;                                   // 最大偏移（向下滚动的极限）
 
+        // ==================== 卡片位置更新函数 ====================
         function updateCards() {
             // 先计算所有卡牌的位置数据
             const cardData = [];
             cards.forEach((card, index) => {
-                // 每张卡片按固定弧度递增，而不是平均分配一圈
-                // 这样卡片数量增加时会自然形成多圈螺旋
-                const angle = index * rotationsPerCard + (rotation * Math.PI / 180);
-                // 使用固定间距，卡片数量多时向下延伸，加上整体偏移
-                const y = index * cardSpacing + offsetY;
+                // 每张卡片按固定弧度递增，形成多圈螺旋
+                const angle = index * rotationsPerCard + (animState.rotation * Math.PI / 180);
+                // 使用固定间距，卡片数量多时向下延伸
+                const y = index * cardSpacing + animState.offsetY;
                 const x = Math.cos(angle) * spiralRadius;
-                const z = Math.sin(angle) * spiralRadius; // z 用于计算深度效果，但不用于 3D 位移
+                const z = Math.sin(angle) * spiralRadius;
                 
                 cardData.push({ card, x, y, z, angle, index });
             });
             
-            // 根据 z 值排序，z 值小的在后面（远离观察者），先渲染
+            // 根据 z 值排序，确保正确的层级关系
             cardData.sort((a, b) => a.z - b.z);
             
             // 更新每张卡牌的位置和层级
@@ -188,77 +203,106 @@
                 const { card, x, y, z, angle } = data;
                 
                 // 根据 z 值计算缩放比例，模拟透视效果
-                // z 范围是 [-spiralRadius, spiralRadius]，映射到 [0.7, 1.1]
-                const normalizedZ = (z + spiralRadius) / (spiralRadius * 2); // 0 到 1
+                const normalizedZ = (z + spiralRadius) / (spiralRadius * 2);
                 const scale = 0.7 + normalizedZ * 0.4;
                 
-                // 计算卡牌朝向中心的角度（用于 3D 旋转效果）
+                // 计算卡牌朝向中心的角度
                 const rotateY = -angle * (180 / Math.PI) + 90;
                 
-                // 使用 2D 位移 + scale 模拟 3D 效果，避免 preserve-3d 导致的穿透
-                // 居中显示：x 不需要偏移，y 减去卡片高度的一半即可
+                // 使用 2D 位移 + scale 模拟 3D 效果
                 card.style.transform = `
                     translate(${x}px, ${y}px)
                     scale(${scale})
                     rotateY(${rotateY}deg)
                 `;
                 
-                // 根据深度调整透明度，增加层次感
+                // 根据深度调整透明度
                 const opacity = 0.5 + normalizedZ * 0.5;
                 card.style.opacity = opacity;
                 
-                // 关键：使用 z-index 控制层级，确保正确的前后遮挡关系
+                // 使用 z-index 控制层级
                 card.style.zIndex = sortedIndex + 1;
             });
         }
 
-        // 平滑动画
-        function animate() {
-            rotation += (targetRotation - rotation) * 0.1;
-            offsetY += (targetOffsetY - offsetY) * 0.1;
+        // ==================== GSAP 动画系统 ====================
+        // 保存当前进行中的 GSAP 动画实例，用于在新输入时更新目标值
+        let currentTween = null;
+        
+        /**
+         * 使用 GSAP 启动或更新动画
+         * - gsap.to() 会平滑地将 animState 的属性动画到目标值
+         * - ease: "power2.out" 提供平滑的缓出效果，比线性插值更自然
+         * - onUpdate 回调在每一帧更新卡片位置
+         * - overwrite: true 确保新动画会覆盖旧的，避免冲突
+         */
+        function animateToTarget() {
+            // 应用边界限制
+            targetOffsetY = gsap.utils.clamp(minOffsetY, maxOffsetY, targetOffsetY);
             
-            // 限制边界：第一张卡片不能超过顶部太多，最后一张卡片不能超过底部太多
-            const minOffsetY = -(cardCount - 1) * cardSpacing - 200; // 最小偏移（向上滚动的极限）
-            const maxOffsetY = 200; // 最大偏移（向下滚动的极限）
-            
-            if (targetOffsetY > maxOffsetY) {
-                targetOffsetY = maxOffsetY;
-            }
-            if (targetOffsetY < minOffsetY) {
-                targetOffsetY = minOffsetY;
-            }
-            
-            updateCards();
-            requestAnimationFrame(animate);
+            // 使用 gsap.to() 创建平滑动画
+            // 如果已经有动画在进行，overwrite: true 会自动覆盖
+            currentTween = gsap.to(animState, {
+                rotation: targetRotation,    // 目标旋转角度
+                offsetY: targetOffsetY,      // 目标垂直偏移
+                duration: 0.8,               // 动画时长 0.8 秒
+                ease: "power2.out",          // GSAP 缓动函数：平滑缓出效果
+                overwrite: true,             // 覆盖之前的动画，避免动画冲突
+                onUpdate: updateCards        // 每帧回调，更新卡片位置
+            });
         }
 
+        // ==================== 事件处理 ====================
         // 滚轮事件：同时旋转和垂直移动
         window.addEventListener('wheel', (e) => {
             e.preventDefault();
-            // 旋转螺旋
+            // 更新目标值
             targetRotation += e.deltaY * 0.3;
-            // 向下滚动时整体向上移动（负值），向上滚动时整体向下移动（正值）
             targetOffsetY -= e.deltaY * 0.5;
+            // 触发 GSAP 动画
+            animateToTarget();
         }, { passive: false });
 
         // 触摸支持
         let touchStartY = 0;
         window.addEventListener('touchstart', (e) => {
             touchStartY = e.touches[0].clientY;
+            // 触摸开始时暂停当前动画，让操作更跟手
+            if (currentTween) {
+                currentTween.kill();
+            }
         });
 
         window.addEventListener('touchmove', (e) => {
             e.preventDefault();
             const touchY = e.touches[0].clientY;
             const deltaY = touchStartY - touchY;
+            
+            // 更新目标值
             targetRotation += deltaY * 0.5;
             targetOffsetY -= deltaY * 0.5;
             touchStartY = touchY;
+            
+            // 触摸移动时使用较短的动画时间，让操作更即时
+            targetOffsetY = gsap.utils.clamp(minOffsetY, maxOffsetY, targetOffsetY);
+            gsap.to(animState, {
+                rotation: targetRotation,
+                offsetY: targetOffsetY,
+                duration: 0.3,               // 触摸时使用更短的动画时间
+                ease: "power1.out",
+                overwrite: true,
+                onUpdate: updateCards
+            });
         }, { passive: false });
 
-        // 初始化
+        // 触摸结束时添加惯性效果
+        window.addEventListener('touchend', () => {
+            // 触摸结束后，继续平滑到目标位置
+            animateToTarget();
+        });
+
+        // ==================== 初始化 ====================
         updateCards();
-        animate();
     </script>
 </body>
 </html>
