@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>螺旋卡牌</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            perspective: 1000px;
+        }
+
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .spiral-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+        }
+
+        .card {
+            position: absolute;
+            width: 120px;
+            height: 180px;
+            border-radius: 12px;
+            background: linear-gradient(145deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 
+                0 10px 30px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            backface-visibility: visible;
+            transition: box-shadow 0.3s ease;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                135deg,
+                rgba(255, 255, 255, 0.3) 0%,
+                transparent 50%,
+                rgba(0, 0, 0, 0.1) 100%
+            );
+            border-radius: 12px;
+        }
+
+        .card::after {
+            content: '';
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+        }
+
+        .card:hover {
+            box-shadow: 
+                0 15px 40px rgba(102, 126, 234, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+
+        .card span {
+            position: relative;
+            z-index: 1;
+        }
+
+        .instructions {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.7);
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 14px;
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .instructions span {
+            display: inline-block;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spiral-container" id="spiral">
+            <!-- 卡牌将通过 JS 动态生成 -->
+        </div>
+    </div>
+    <div class="instructions">
+        <span>↕</span> 滚动鼠标滚轮旋转卡牌
+    </div>
+
+    <script>
+        const spiral = document.getElementById('spiral');
+        const cardCount = 50;
+        const colors = [
+            'linear-gradient(145deg, #667eea 0%, #764ba2 100%)',
+            'linear-gradient(145deg, #f093fb 0%, #f5576c 100%)',
+            'linear-gradient(145deg, #4facfe 0%, #00f2fe 100%)',
+            'linear-gradient(145deg, #43e97b 0%, #38f9d7 100%)',
+            'linear-gradient(145deg, #fa709a 0%, #fee140 100%)',
+            'linear-gradient(145deg, #a8edea 0%, #fed6e3 100%)',
+            'linear-gradient(145deg, #ff9a9e 0%, #fecfef 100%)',
+            'linear-gradient(145deg, #ffecd2 0%, #fcb69f 100%)',
+            'linear-gradient(145deg, #667eea 0%, #764ba2 100%)',
+            'linear-gradient(145deg, #6a11cb 0%, #2575fc 100%)',
+            'linear-gradient(145deg, #f093fb 0%, #f5576c 100%)',
+            'linear-gradient(145deg, #37ecba 0%, #72afd3 100%)'
+        ];
+
+        // 创建卡牌
+        for (let i = 0; i < cardCount; i++) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `<span>${i + 1}</span>`;
+            card.style.background = colors[i % colors.length];
+            spiral.appendChild(card);
+        }
+
+        const cards = document.querySelectorAll('.card');
+        let rotation = 0;
+        let targetRotation = 0;
+        let offsetY = 0; // 整体垂直偏移量
+        let targetOffsetY = 0; // 目标垂直偏移量
+        const cardSpacing = 80; // 卡片之间的固定间距
+        const spiralRadius = 250; // 螺旋半径（放大）
+        const rotationsPerCard = 0.6; // 每张卡片旋转的弧度，控制螺旋的紧密度
+
+        function updateCards() {
+            // 先计算所有卡牌的位置数据
+            const cardData = [];
+            cards.forEach((card, index) => {
+                // 每张卡片按固定弧度递增，而不是平均分配一圈
+                // 这样卡片数量增加时会自然形成多圈螺旋
+                const angle = index * rotationsPerCard + (rotation * Math.PI / 180);
+                // 使用固定间距，卡片数量多时向下延伸，加上整体偏移
+                const y = index * cardSpacing + offsetY;
+                const x = Math.cos(angle) * spiralRadius;
+                const z = Math.sin(angle) * spiralRadius; // z 用于计算深度效果，但不用于 3D 位移
+                
+                cardData.push({ card, x, y, z, angle, index });
+            });
+            
+            // 根据 z 值排序，z 值小的在后面（远离观察者），先渲染
+            cardData.sort((a, b) => a.z - b.z);
+            
+            // 更新每张卡牌的位置和层级
+            cardData.forEach((data, sortedIndex) => {
+                const { card, x, y, z, angle } = data;
+                
+                // 根据 z 值计算缩放比例，模拟透视效果
+                // z 范围是 [-spiralRadius, spiralRadius]，映射到 [0.7, 1.1]
+                const normalizedZ = (z + spiralRadius) / (spiralRadius * 2); // 0 到 1
+                const scale = 0.7 + normalizedZ * 0.4;
+                
+                // 计算卡牌朝向中心的角度（用于 3D 旋转效果）
+                const rotateY = -angle * (180 / Math.PI) + 90;
+                
+                // 使用 2D 位移 + scale 模拟 3D 效果，避免 preserve-3d 导致的穿透
+                // 居中显示：x 不需要偏移，y 减去卡片高度的一半即可
+                card.style.transform = `
+                    translate(${x}px, ${y}px)
+                    scale(${scale})
+                    rotateY(${rotateY}deg)
+                `;
+                
+                // 根据深度调整透明度，增加层次感
+                const opacity = 0.5 + normalizedZ * 0.5;
+                card.style.opacity = opacity;
+                
+                // 关键：使用 z-index 控制层级，确保正确的前后遮挡关系
+                card.style.zIndex = sortedIndex + 1;
+            });
+        }
+
+        // 平滑动画
+        function animate() {
+            rotation += (targetRotation - rotation) * 0.1;
+            offsetY += (targetOffsetY - offsetY) * 0.1;
+            
+            // 限制边界：第一张卡片不能超过顶部太多，最后一张卡片不能超过底部太多
+            const minOffsetY = -(cardCount - 1) * cardSpacing - 200; // 最小偏移（向上滚动的极限）
+            const maxOffsetY = 200; // 最大偏移（向下滚动的极限）
+            
+            if (targetOffsetY > maxOffsetY) {
+                targetOffsetY = maxOffsetY;
+            }
+            if (targetOffsetY < minOffsetY) {
+                targetOffsetY = minOffsetY;
+            }
+            
+            updateCards();
+            requestAnimationFrame(animate);
+        }
+
+        // 滚轮事件：同时旋转和垂直移动
+        window.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            // 旋转螺旋
+            targetRotation += e.deltaY * 0.3;
+            // 向下滚动时整体向上移动（负值），向上滚动时整体向下移动（正值）
+            targetOffsetY -= e.deltaY * 0.5;
+        }, { passive: false });
+
+        // 触摸支持
+        let touchStartY = 0;
+        window.addEventListener('touchstart', (e) => {
+            touchStartY = e.touches[0].clientY;
+        });
+
+        window.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touchY = e.touches[0].clientY;
+            const deltaY = touchStartY - touchY;
+            targetRotation += deltaY * 0.5;
+            targetOffsetY -= deltaY * 0.5;
+            touchStartY = touchY;
+        }, { passive: false });
+
+        // 初始化
+        updateCards();
+        animate();
+    </script>
+</body>
+</html>
